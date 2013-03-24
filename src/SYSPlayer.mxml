@@ -1,0 +1,805 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009"
+					   xmlns:s="library://ns.adobe.com/flex/spark"
+					   xmlns:mx="library://ns.adobe.com/flex/mx"
+					   xmlns:components="components.*"
+					   backgroundAlpha="0.0"
+					   showStatusBar="false"
+					   currentState="LOGIN"
+					   width="322" height="299"
+					   creationComplete="init()">
+	<s:states>
+		<s:State name="ORIGINAL"/>
+		<s:State name="LOGIN"/>
+		<s:State name="RECORD"/>
+		<s:State name="PLAY"/>
+		<s:State name="PHOTO"/>
+		<s:State name="TRANSITION"/>
+	</s:states>
+	<fx:Metadata>
+		[Event(name="controlButton", type="events.ControlEvent")]
+	</fx:Metadata>
+	<fx:Style>	
+		@namespace s "library://ns.adobe.com/flex/spark";
+		@namespace mx "library://ns.adobe.com/flex/mx";	
+		
+		mx|ToolTip{
+			font-size: 13;
+			font-style: normal;
+			font-weight: normal;
+		}
+		
+		s|DropDownList #labelDisplay
+		{
+			font-style:italic;
+			
+		}
+		
+		s|DropDownList:open
+		{	
+		}
+		
+		s|Label
+		{
+			fontFamily:STHeiti,simhei;
+		}
+		
+		s|TextInput
+		{
+			fontFamily:STSong;
+			color:"0x000000";
+			fontSize:15px;
+		}
+		
+		.commonColor
+		{
+			color:#ffffff;
+		}
+		
+		.warningColor
+		{
+			color:#ff0000;
+		}
+		
+		.infoColorYellow
+		{
+			color:#ffff00;
+		}
+		
+		.infoColorBlue
+		{
+			color:#0000ff;
+		}
+		
+		.big
+		{
+			fontSize:30px;
+		}
+		
+		.middle
+		{
+			fontSize:15px;
+		}
+		
+		.small
+		{
+			fontSize:12px;
+		}
+	</fx:Style>
+	
+	<fx:Script>
+		<![CDATA[
+			import events.ControlEvent;
+			
+			import flash.utils.setTimeout;
+			
+			import mx.collections.ArrayCollection;
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.events.StateChangeEvent;
+			import mx.graphics.codec.*;
+			import mx.rpc.events.FaultEvent;
+			import mx.rpc.events.ResultEvent;
+			import mx.rpc.http.HTTPService;
+			import mx.states.State;
+			import mx.utils.Base64Encoder;
+			
+			import org.osmf.metadata.Metadata;
+			
+			private var varMetaObject:Object;
+			private var varNetConnection:NetConnection;
+			
+			private var urlRequest:URLRequest;
+			private var fileReferenceList:FileReferenceList;
+			private var serverSideScript:String = "http://www.shiyishi.cn/do/videoAddvod.do";
+			private var uploadTotalSize:int;
+			private var uploadLoadedSize:int;
+			private var uploadError:Boolean;
+			private var varNativeProcess:NativeProcess;
+			private var varExeFile:File;
+			private var varLogOutput:String;
+			private var varErrOutput:String;
+			
+			//interactive var
+			public var varNetStream:NetStream;
+			[Bindable]
+			public var varflvHeight:int = 240;
+			[Bindable]
+			public var varflvWidth:int = 320;
+			[Bindable]
+			public var varphotoHeight:int = 240;
+			[Bindable]
+			public var varphotoWidth:int = 320;
+			public var varflvFrameRate:int = 10;
+			
+			[Bindable]
+			public var varUserName:String;
+			[Bindable]
+			public var varPassword:String;
+			public var varUserCompany:String;
+			[Bindable]
+			public var varAuthInfo:String;
+			
+			public var varCurrentPhoto:File;
+			public var varPhotoBitmapData:BitmapData;
+			
+			public var varChoseCameraIndex:int;
+			public var varChoseCamera:Camera;
+			
+			public var varChoseMicIndex:int;
+			public var varChoseMic:Microphone;
+			
+			public var varChoseToConvertMovie:File;
+			
+			public var varChoseMovie:File;
+			public var varCurrentMovie:File;
+			public var varMovieSecToKeyFrame:Array;
+			public var varMovieByteArray:ByteArray;
+			public var varMovieStart:int;
+			[Bindable]
+			public var varMovieDuration:int;
+			public var movieOffset:int;
+			
+			public var varRecordSecLimitation:int;
+			public var varRecordSecEndWarning:int;
+			
+			private function init():void 
+			{
+				varRecordSecLimitation = 180;
+				varRecordSecEndWarning = 10;
+				varNetConnection = new NetConnection();
+				varNetConnection.connect(null);
+				varNetStream = new NetStream(varNetConnection);
+				varMetaObject = new Object();
+				varMetaObject.onMetaData = onMetaDataHandler();
+				varNetStream.addEventListener(NetStatusEvent.NET_STATUS,netStatusHandler)
+				varNetStream.client = varMetaObject;
+				varNetStream.play(null);
+				addEventListener(MouseEvent.MOUSE_DOWN, onMouseDown);
+				addEventListener(ControlEvent.CONTROL_BUTTON, controlEventHandler);
+			}
+			
+			private function cleanup():void
+			{
+				varUserName="";
+				varPassword="";
+				varCurrentPhoto = null;
+				varPhotoBitmapData = null;
+				varChoseCameraIndex = 0;
+				varChoseCamera = null;
+				varChoseMicIndex = 0;
+				varChoseMic = null;
+				varChoseMovie = null;
+				varCurrentMovie = null;
+				varMovieSecToKeyFrame = null;
+				varMovieByteArray = null;
+				varMovieStart = -1;
+				varMovieDuration = -1;
+				movieOffset = -1;
+				original.ddlCamera.selectedIndex = 0;
+				original.ddlMic.selectedIndex = 0;
+			}
+			
+			private function onMouseDown(evt:MouseEvent):void
+			{
+				trace(evt.target.toString());
+				trace(evt.currentTarget.toString());
+				stage.nativeWindow.startMove();
+			}
+			
+			private function controlEventHandler(e:ControlEvent):void
+			{
+				trace("d:" + e.type + ":" + e.strButton);
+				switch(currentState)
+				{
+					case "LOGIN":
+					{
+						if (e.strButton == "btnLogin")
+						{
+							transition.trasitionProcess("LOGIN", "ORIGINAL");
+						}
+						break;
+					}
+					case "ORIGINAL":
+					{
+						if (e.strButton == "btnLogout")
+						{
+							cleanup();
+							transition.trasitionProcess("ORIGINAL", "LOGIN");
+						}
+						else if (e.strButton == "btnPhoto")
+						{
+							//check camera and mic
+							varChoseCamera = Camera.getCamera("" + varChoseCameraIndex);
+							if (varChoseCamera == null)
+							{
+								Alert.show("没有找到摄像头，或摄像头正在使用中！");
+							}
+							else
+							{														
+								transition.trasitionProcess("ORIGINAL", "PHOTO");
+							}
+						}
+						else if (e.strButton == "btnRecord")
+						{
+							//check camera and mic
+							varChoseCamera = Camera.getCamera("" + varChoseCameraIndex);
+							varChoseMic = Microphone.getMicrophone(varChoseMicIndex);
+							if (varChoseCamera == null)
+							{
+								Alert.show("没有找到摄像头，或摄像头正在使用中！");
+							}
+							else if (varChoseMic == null)
+							{
+								Alert.show("没有找到话筒，或话筒正在使用中！");
+							}
+							else
+							{														
+								transition.trasitionProcess("ORIGINAL", "RECORD");
+							}
+							
+						}
+						else if (e.strButton == "btnPlay")
+						{
+							transition.trasitionProcess("ORIGINAL", "PLAY");
+						}
+						else if (e.strButton == "btnUpload")
+						{
+							Alert.show("每位会员只能有一份视频简历，新上传照片,视频会覆盖旧文件，是否继续？", "提醒", Alert.YES|Alert.NO, this, alertHandler);
+						}
+						break;
+					}
+					case "PHOTO":
+					{
+						if (e.strButton == "btnStop")
+						{
+							savePhoto();
+							transition.trasitionProcess("PHOTO", "ORIGINAL");
+						}
+						break;
+					}
+					case "PLAY":
+					{
+						if (e.strButton == "btnStop")
+						{
+							transition.trasitionProcess("PLAY", "ORIGINAL");
+						}
+						break;
+					}
+					case "RECORD":
+					{
+						if (e.strButton == "btnStop")
+						{
+							record.stopRecord();
+							transition.trasitionProcess("RECORD", "ORIGINAL");
+						}
+						break;
+					}
+				}
+			}
+			
+			private function alertHandler(e:CloseEvent):void
+			{
+				if (e.detail == Alert.YES)
+				{
+					uploadError = false;
+					if (varCurrentMovie == null || !varCurrentMovie.exists || varCurrentMovie.isDirectory)
+					{
+						Alert.show("指定视频文件不存在，请重新选择或录制");
+					}
+					else
+					{
+						transition.trasitionProcess("ORIGINAL", "ORIGINAL_FILEUPLOADED");
+					}
+				}
+				
+			}
+			
+			public function browseFileToConvert():void
+			{	
+				varChoseToConvertMovie = new File();
+				varChoseToConvertMovie.addEventListener(Event.SELECT,selectToConvertHandler);
+				varChoseToConvertMovie.browse();				
+			}
+			
+			public function browseFlvFile():void
+			{	
+				var flvFilter:FileFilter = new FileFilter("视频文件","*.flv;*.flvshiyishi");
+				varChoseMovie = new File();
+				varChoseMovie.addEventListener(Event.SELECT,selectHandler);
+				varChoseMovie.browse([flvFilter]);				
+			}
+			
+			private function selectToConvertHandler(e:Event):void
+			{
+				transition.trasitionProcess("ORIGINAL", "ORIGINAL_FILECONVERT");
+			}
+			
+			
+			
+			public function convertMovie(rawFile:File):void
+			{
+				//copy the raw file to applicationStorageDirectory
+				varNativeProcess = new NativeProcess();
+				varNativeProcess.addEventListener(ProgressEvent.STANDARD_OUTPUT_DATA, onOutputData);
+				varNativeProcess.addEventListener(ProgressEvent.STANDARD_ERROR_DATA, onErrorData);
+				varNativeProcess.addEventListener(NativeProcessExitEvent.EXIT, onExit);
+				var os:String = flash.system.Capabilities.os.substr(0, 3);
+				if (os == "Win") {
+					varExeFile = File.applicationDirectory.resolvePath("ffmpeg.exe");
+				} else if (os == "Mac") {
+					varExeFile = File.applicationDirectory.resolvePath("ffmpeg");
+				} else {
+					trace("Must be Unix or Linux");
+				}
+				var startupInfo:NativeProcessStartupInfo = new NativeProcessStartupInfo();
+				startupInfo.executable = varExeFile;
+				startupInfo.workingDirectory = File.applicationStorageDirectory;
+				var processArgs:Vector.<String> = new Vector.<String>();	
+				
+				processArgs.push("-i",rawFile.nativePath,"-r","10","-s","320*240","-ar","22050","-vb","2000k","-y","-f","flv", varUserName + "_converted.flv");
+				
+				startupInfo.arguments = processArgs;
+				
+				try {
+					trace("pstart:" + new Date().getTime());
+					varNativeProcess.start(startupInfo);
+				} catch (e:IllegalOperationError) {
+					trace("Illegal Operation: "+e.toString());
+				} catch (ae:ArgumentError) {
+					trace("Argument Error: "+ae.toString());
+				} catch (e:Error) {
+					trace("Error: "+e.toString());
+				}
+			}
+			
+			public function onExit(e:NativeProcessExitEvent):void {
+				trace("Native Process Exit code: "+e.exitCode);
+				if (e.exitCode == 0)
+				{
+					var varFinalFlv:File = File.applicationStorageDirectory.resolvePath(varUserName + "_converted.flv");
+					var varTmpDate:Date = new Date();
+					var varTmpFileName:String = varUserName + "_converted_" + varTmpDate.getFullYear() + "_" + (varTmpDate.getMonth() + 1) + "_" + varTmpDate.getDate() + "_" + varTmpDate.getHours() + "_" + varTmpDate.getMinutes() + "_" + varTmpDate.getSeconds() + ".flv";
+					varFinalFlv.copyTo(File.desktopDirectory.resolvePath(varTmpFileName));
+					setCurrentMovie(File.desktopDirectory.resolvePath(varTmpFileName));
+					transition.transitionTo();
+				}
+				else 
+				{
+					transition.transitionTo();
+					Alert.show("格式不支持，未能转换成功!");
+				}
+			}
+			
+			private function onOutputData(evt:ProgressEvent):void{
+				varLogOutput +="\n"+varNativeProcess.standardOutput.readUTFBytes(varNativeProcess.standardOutput.bytesAvailable);
+/* 				var varTempFile:File = File.desktopDirectory.resolvePath("Convertlog.txt");
+				var varFs:FileStream = new FileStream();
+				varFs.open(varTempFile,FileMode.WRITE);
+				varFs.writeUTF(varLogOutput);				
+				varFs.close(); */
+				trace("outputdata");
+			}
+			
+			private function onErrorData(evt: ProgressEvent):void
+			{
+				var tmpStr:String = varNativeProcess.standardError.readUTFBytes(varNativeProcess.standardError.bytesAvailable);
+				
+				if (tmpStr.indexOf("time=") != -1)
+				{
+					var start:int;
+					var end:int;
+					start = tmpStr.indexOf("time=");
+					end = tmpStr.indexOf(" ", start);
+					transition.labPercent.text = "转换进度:" + tmpStr.substring(start, end);
+				}
+				varErrOutput +="\n"+ tmpStr;
+/* 				var varTempFile:File = File.desktopDirectory.resolvePath("Convertlog2.txt");
+				var varFs:FileStream = new FileStream();
+				varFs.open(varTempFile,FileMode.WRITE);
+				varFs.writeUTF(varErrOutput);	
+				varFs.close(); */
+				trace("errordata");
+			}
+			
+			private function selectHandler(e:Event):void
+			{
+				setCurrentMovie(varChoseMovie);
+				transition.trasitionProcess("ORIGINAL", "ORIGINAL_FILESELECTED");
+			}
+			
+			public function setCurrentMovie(varFile:File):void
+			{
+				varCurrentMovie = varFile;
+				resetAndLoadMovie();
+			}
+			
+			public function savePhoto():void
+			{
+				if (varPhotoBitmapData != null)
+				{
+					var png:ByteArray = new PNGEncoder().encode(varPhotoBitmapData);
+					varCurrentPhoto = File.applicationStorageDirectory.resolvePath(varUserName + ".png");
+					var fs:FileStream = new FileStream();
+					fs.open(varCurrentPhoto, FileMode.WRITE);
+					fs.writeBytes(png);
+					fs.close();
+				}
+			}
+		
+			private function decodeMovieData(sourceArray:ByteArray):ByteArray
+			{
+				var sign:ByteArray = new ByteArray();
+				sourceArray.readBytes(sign, 0, 14);
+				if (sign.toString() == 'pennsongSigned')
+				{
+					var pwd:String = 'songpengcheng';
+					var decodedByteArray:ByteArray = new ByteArray();
+					sourceArray.readBytes(decodedByteArray);
+					for (var i:int = 0; i < decodedByteArray.length; i++)
+					{
+						decodedByteArray[i] = decodedByteArray[i]^pwd.charCodeAt(i%pwd.length);
+					}
+					return decodedByteArray;
+				}
+				else
+				{
+					return sourceArray;
+				}
+			}
+			
+			private function resetAndLoadMovie():void
+			{
+				movieOffset = 0;
+				varMovieStart = -1;
+				varMovieSecToKeyFrame = new Array();	
+				var varFs:FileStream = new FileStream();
+				varFs.open(varCurrentMovie, FileMode.READ);
+				varMovieByteArray = new ByteArray;
+				varFs.readBytes(varMovieByteArray);
+				varFs.close();
+				varFs = null;
+				
+				varNetStream.appendBytesAction(NetStreamAppendBytesAction.RESET_BEGIN);
+				varNetStream.play(null);
+				
+				varMetaObject.onSeekPoint = onSeekPointHandler;
+				
+				varMovieByteArray = decodeMovieData(varMovieByteArray);
+				
+				varNetStream.appendBytes(varMovieByteArray);
+				varMetaObject.onSeekPoint = onSeekPointHandler_null;
+				varNetStream.pause();
+				
+			}
+			
+			private function onSeekPointHandler_null(sec:Number,Iframe:Number):void
+			{
+				trace("onSeekPointHandler_null");
+			}
+			
+			private function onMetaDataHandler():void
+			{
+				
+			}
+			
+			private function onSeekPointHandler(sec:Number,Iframe:Number):void
+			{
+				trace("onSeekPointHandler");
+				if (varMovieStart == -1)
+				{
+					varMovieStart = Math.round(sec);
+				}
+				varMovieSecToKeyFrame[Math.round(sec)] = Iframe;
+				varMovieDuration = Math.round(sec);
+			}
+			
+			private function netStatusHandler(e:NetStatusEvent):void
+			{
+				switch (e.info.code)
+				{
+					case "NetStream.Buffer.Empty":
+						dispatchEvent(new ControlEvent("controlButton", "btnStop"));
+						break;
+					case "NetStream.Seek.Notify":
+						varNetStream.appendBytesAction(NetStreamAppendBytesAction.RESET_SEEK);
+						var tmpByteArray:ByteArray = new ByteArray();
+						var chosenSec:int = goToSec(e.info.seekPoint);
+						varMovieByteArray.position = varMovieSecToKeyFrame[chosenSec];
+						trace("now go to:" + chosenSec);
+						movieOffset = chosenSec;
+						varMovieByteArray.readBytes(tmpByteArray);	
+						varNetStream.play(null);
+						varNetStream.appendBytes(tmpByteArray);
+						//						varNetStream.resume();
+				}
+			}
+			
+			//find the byte offset of the special second
+			private function goToSec(sec:int):int
+			{
+				var min:int = varMovieStart;
+				var max:int = varMovieDuration;
+				var step:int = 0;
+				var checkSec:int = sec;
+				var count:int = 0;
+				var checkDirection:int = 1;//1:forward 2:backword
+				
+				while (checkSec > min && checkSec < max)
+				{
+					count++;
+					if (varMovieSecToKeyFrame[checkSec] == undefined)
+					{
+						if (count % 2 == 0)
+						{
+							checkDirection = 1;
+							step++;
+						}
+						else
+						{
+							checkDirection = -1;	
+						}
+						checkSec = sec + step* checkDirection;
+					}
+					else
+					{
+						break;
+					}					
+				}
+				return checkSec;
+			}
+			
+			private function uploadFiles():void
+			{
+				
+				/* 				if (login.labIp.text != "")
+				{
+				serverSideScript = "http://" + login.labIp.text + "/~penn/test/upload_file.php";
+				trace(serverSideScript);
+				} */
+				transition.prb.indeterminate = false;
+				transition.prb.mode = "manual";
+				transition.labInfo.text = "正在上传视频...";
+				uploadTotalSize = varCurrentMovie.size + ((varCurrentPhoto != null && varCurrentPhoto.exists) ? varCurrentPhoto.size : 0);
+				if(uploadTotalSize > 20000000)
+				{
+					Alert.show("上传文件超出限制\"10M\",请录制较短视频后重试!");
+					transition.transitionTo();
+				}
+				else
+				{
+					uploadLoadedSize = 0;
+					//uploadPhoto();
+					uploadVideo();
+				}
+			}
+			
+			// called after a file is uploaded
+			
+			private function photoCompleteHandler(e:Event):void
+			{
+				trace("File:" + e.target.name + " uploaded successfully");
+			}
+			
+			private function movieCompleteHandler(e:Event):void
+			{
+				trace("File:" + e.target.name + " uploaded successfully");
+			}
+			
+			//called after file upload is done and Data has been returned from Server
+			
+			private function photoDataHandler(e:DataEvent):void
+			{
+				trace("called after file upload is done and Data has been returned from Server:" + e.data.toString() + "dddddddddddd");
+				if (e.data.indexOf("SUCCESS") == 0)
+				{
+					uploadLoadedSize += varCurrentPhoto.size;
+					uploadVideo();
+				}
+				else
+				{
+					Alert.show("网络繁忙，上传失败，请重试，错误代码:" + e.data);
+					transition.transitionTo();
+				}
+			}
+			
+			private function movieDataHandler(e:DataEvent):void
+			{
+				trace("called after file upload is done and Data has been returned from Server:" + e.data.toString() + "dddddddddddd");
+				if (e.data.indexOf("恭喜") == 0)
+				{
+					transition.prb.setProgress(uploadTotalSize, uploadTotalSize);
+					transition.labPercent.text = '100%';
+					
+					transition.labInfo.text = "文件上传成功！";
+					setTimeout(transition.transitionTo, 3000);
+				}
+				else
+				{
+					Alert.show("网络繁忙，上传失败，请重试，错误代码:" + e.data);
+					transition.transitionTo();
+				}
+			}
+			
+			// called if there is an error detected by flash player browsing or uploading a file
+			
+			private function ioErrorHandler(event:IOErrorEvent):void
+			{
+				if (!uploadError)
+				{
+					trace("ioErrorHandler:" + event.toString());
+					Alert.show("连不上服务器，请检查网络后重试");
+					transition.transitionTo();
+				}
+			}
+			// called if a security error
+			
+			private function securityErrorHandler(event:SecurityErrorEvent):void
+			{
+				trace("securityErrorHandler:" + event.toString());
+			}
+			// server will return an http status code, code 200 means all is good
+			
+			private function httpStatusHandler(event:HTTPStatusEvent):void
+			{
+				trace("http status:" + event.status);
+				if (event.status != 200)
+				{
+					uploadError = true;
+					trace("event:" + event.toString());
+					Alert.show("服务器维护中，请稍候再试");
+					transition.transitionTo();
+				}
+				else
+				{
+					trace(" server will return an http status code, code 200 means all is good");
+				}
+			}
+			
+			private function fileLoadingProgressHandler(e:ProgressEvent):void
+			{
+				trace("fileLoadingProgressHandler:" + Math.round(((uploadLoadedSize + e.bytesLoaded) / uploadTotalSize) * 100) + "%");
+				transition.prb.setProgress(uploadLoadedSize + e.bytesLoaded, uploadTotalSize);
+				transition.labPercent.text = "" + Math.round(((uploadLoadedSize + e.bytesLoaded) / uploadTotalSize) * 100) + "%";
+			}
+			
+			private function uploadPhoto():void
+			{
+				var params:URLVariables = new URLVariables();
+				params.user = varUserName;
+				params.pass = varPassword;
+				params.type = ".png";
+				
+				urlRequest = new URLRequest(serverSideScript);
+				urlRequest.method = URLRequestMethod.POST;
+				urlRequest.data = params;
+				
+				if (varCurrentPhoto != null && varCurrentPhoto.exists)
+				{					
+					// upload the file to the server side script
+					//					fileReference.addEventListener(Event.COMPLETE, photoUploadCompleteHandler);
+					//test
+					varCurrentPhoto.addEventListener(Event.COMPLETE, photoCompleteHandler);
+					varCurrentPhoto.addEventListener(DataEvent.UPLOAD_COMPLETE_DATA,photoDataHandler);
+					varCurrentPhoto.addEventListener(SecurityErrorEvent.SECURITY_ERROR,securityErrorHandler);
+					varCurrentPhoto.addEventListener(HTTPStatusEvent.HTTP_STATUS,httpStatusHandler);
+					varCurrentPhoto.addEventListener(IOErrorEvent.IO_ERROR,ioErrorHandler);
+					varCurrentPhoto.addEventListener(ProgressEvent.PROGRESS, fileLoadingProgressHandler);
+					//test
+					try
+					{
+						varCurrentPhoto.upload(urlRequest);
+					}
+					catch (e:Error)
+					{	
+						//catch upload button clicked again before the uploading finished
+						trace(e.toString());
+					}
+					
+				}
+				else
+				{
+					uploadVideo();
+				}
+			}
+			
+			private function uploadVideo():void
+			{
+				var params:URLVariables = new URLVariables();
+				params.uemail = varUserName;
+				params.upassword = varPassword;
+				params.type = ".flv";
+				
+				urlRequest = new URLRequest(serverSideScript);
+				urlRequest.method = URLRequestMethod.POST;
+				urlRequest.data = params;
+				
+				if (varCurrentMovie.exists)
+				{
+					// upload the file to the server side script
+					//					fileReference.addEventListener(Event.COMPLETE, uploadCompleteHandler);
+					//					fileReference.addEventListener(ProgressEvent.PROGRESS, fileLoadingProgressHandler);
+					
+					//					fileReference.addEventListener(DataEvent.UPLOAD_COMPLETE_DATA,fileUploadResponseHandler);
+					
+					//test
+					varCurrentMovie.addEventListener(Event.COMPLETE, movieCompleteHandler);
+					varCurrentMovie.addEventListener(DataEvent.UPLOAD_COMPLETE_DATA,movieDataHandler);
+					varCurrentMovie.addEventListener(SecurityErrorEvent.SECURITY_ERROR,securityErrorHandler);
+					varCurrentMovie.addEventListener(HTTPStatusEvent.HTTP_STATUS,httpStatusHandler);
+					varCurrentMovie.addEventListener(IOErrorEvent.IO_ERROR,ioErrorHandler);
+					varCurrentMovie.addEventListener(ProgressEvent.PROGRESS, fileLoadingProgressHandler);
+					//test
+					try
+					{
+						varCurrentMovie.upload(urlRequest, 'vodurl');
+					}
+					catch (e:Error)
+					{	
+						//catch upload button clicked again before the uploading finished
+						trace(e.toString());
+					}
+					
+				}
+				else
+				{
+					Alert.show("文件不存在，请重试!");
+				}
+			}
+			
+			public function auth():void
+			{				
+				//auth included in uploadFiles
+				uploadFiles();
+			}
+			
+		]]>
+	</fx:Script>
+	
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+		
+	</fx:Declarations>
+	<s:layout>
+		<s:VerticalLayout horizontalAlign="right" paddingLeft="0" paddingRight="0" paddingBottom="0" paddingTop="0" gap="1"/>
+	</s:layout>
+	<s:HGroup gap="1">
+		<mx:Button width="20" height="17"
+				   upSkin="@Embed(source='assets/minimumDefault.png')"
+				   overSkin="@Embed(source='assets/minimumActive.png')"
+				   downSkin="@Embed(source='assets/minimumActive.png')"
+				   click="this.minimize()"/>
+		<mx:Button width="20" height="17"
+				   upSkin="@Embed(source='assets/closeDefault.png')"
+				   overSkin="@Embed(source='assets/closeActive.png')"
+				   downSkin="@Embed(source='assets/closeActive.png')"
+				   click="this.close()"/>
+	</s:HGroup>
+	<components:LoginWindow id="login" varSYSPlayer="{this}" includeIn="LOGIN"/>
+	<components:OriginalWindow id="original" varSYSPlayer="{this}" includeIn="ORIGINAL"/>
+	<components:RecordWindow id="record" varSYSPlayer="{this}" includeIn="RECORD"/>
+	<components:PlayWindow id="play" varSYSPlayer="{this}" includeIn="PLAY"/>
+	<components:PhotoWindow id="photo" varSYSPlayer="{this}" includeIn="PHOTO"/>
+	<components:TransitionWindow id="transition" varSYSPlayer="{this}" includeIn="LOGIN,TRANSITION" visible.LOGIN="false" includeInLayout.LOGIN="false"/>
+	
+</s:WindowedApplication>

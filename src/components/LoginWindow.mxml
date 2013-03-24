@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:BorderContainer xmlns:fx="http://ns.adobe.com/mxml/2009"
+				   xmlns:s="library://ns.adobe.com/flex/spark"
+				   xmlns:mx="library://ns.adobe.com/flex/mx"
+				   width="322" height="281" backgroundColor="#000000" borderVisible="false"
+				   backgroundImage="@Embed(source='assets/loginBackground.png')"
+				   dropShadowVisible="true"
+				   creationComplete="init()">	
+	
+	<s:layout>
+		<s:VerticalLayout
+			horizontalAlign="center"
+			verticalAlign="middle"
+			gap="20"/>
+	</s:layout>
+	<fx:Metadata>
+		[Event(name="controlButton", type="events.ControlEvent")]
+	</fx:Metadata>
+	<fx:Script>
+		<![CDATA[
+			import events.ControlEvent;
+			import mx.controls.Alert;
+			[Bindable]
+			private var varInfo:String;
+			
+			//interactive var
+			[Bindable]
+			public var varSYSPlayer:SYSPlayer;
+			
+			public function init():void
+			{
+				varInfo = "";
+			}
+			
+			public function cleanup():void
+			{
+			}
+			
+			protected function btnLogin_clickHandler(event:MouseEvent):void
+			{		
+				varInfo = "登录中..."
+				var result:String;
+				
+				var loader:URLLoader = new URLLoader();
+				loader.addEventListener(Event.COMPLETE, completeHandler);
+				loader.addEventListener(HTTPStatusEvent.HTTP_STATUS, httpStatusHandler);
+				
+				var request:URLRequest = new URLRequest("http://www.shiyishi.cn/do/uVideologin.do");
+				request.method = URLRequestMethod.POST;
+				var params:URLVariables = new URLVariables();
+				params.uemail = varSYSPlayer.varUserName;
+				params.upassword = varSYSPlayer.varPassword;
+				request.data = params;
+				try {
+					loader.load(request);
+				} catch (error:Error) {
+					Alert.show("网络连接失败！", "错误", Alert.YES);
+				}
+			}
+			
+			private function loginResult(result:String):void
+			{
+				switch(result)
+				{
+					case "登录成功"://success
+						varInfo = "";
+						varSYSPlayer.varUserCompany = '';
+						if (varSYSPlayer.varUserName.indexOf('@') == -1)
+						{
+							varSYSPlayer.varAuthInfo = "仅供" + varSYSPlayer.varUserName + "公司招聘使用";							
+						}
+						else
+						{
+							varSYSPlayer.varAuthInfo = "内容授权" + varSYSPlayer.varUserCompany  + ":" + varSYSPlayer.varUserName + "使用";
+						}
+						varSYSPlayer.varCurrentMovie = null;
+						dispatchEvent(new ControlEvent("controlButton", "btnLogin"));
+						break;
+					default:
+					varInfo = result;
+					break;
+				}
+			}
+			
+			private function completeHandler(event:Event):void {
+				var loader:URLLoader = URLLoader(event.target);
+				loginResult(loader.data);
+			}
+			
+			private function httpStatusHandler(event:HTTPStatusEvent):void {
+				trace("httpStatusHandler: " + event);
+				if (event.status == 404)
+				{
+					Alert.show("网络连接失败！", "错误", Alert.YES);
+				}
+			}
+		]]>
+	</fx:Script>
+	
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<!--<s:Label styleName="commonColor big" text="登录"/>-->
+	<s:BorderContainer height="50%" backgroundAlpha="0" borderVisible="false">
+		
+	</s:BorderContainer>
+	<s:BorderContainer  backgroundAlpha="0" borderVisible="false">
+		
+		<s:layout>
+			<s:VerticalLayout
+				horizontalAlign="center"
+				verticalAlign="middle"
+				gap="2"/>
+		</s:layout>
+		<s:HGroup verticalAlign="middle">		
+			<s:Label styleName="warningColor small" text="帐号:"/>
+			<s:TextInput id="txiAccount" y="-3" width="72" height="19" borderColor="#FF0000"
+						 fontFamily="Times New Roman" fontSize="20"
+						 text="@{varSYSPlayer.varUserName}"/>
+		</s:HGroup>
+		<s:Label styleName="warningColor small" text="请您输入&quot;视一视&quot;注册帐号"/>
+		<s:HGroup verticalAlign="middle">	
+			<s:Label styleName="warningColor small" text="密码:"/>
+			<s:TextInput id="txiPassword" width="72" height="19" borderColor="#FF0000"
+						 displayAsPassword="true" text="@{varSYSPlayer.varPassword}"/>
+		</s:HGroup>	
+		<s:Label styleName="warningColor small" text="请您输入&quot;视一视&quot;注册密码"/>
+		<s:Label id="labInfo" styleName="commonColor small warningColor" text="{varInfo}"/>
+		<s:Button id="btnLogin" styleName="login" label="登录" click="btnLogin_clickHandler(event)"/>
+		<s:Label color="#FFFFFF" text="version:2013/03/24_22:12"/>
+		<!--<s:TextInput id="labIp" borderVisible="false" color="#FFFFFF" contentBackgroundColor="#000000"/>-->
+	</s:BorderContainer>
+</s:BorderContainer>
